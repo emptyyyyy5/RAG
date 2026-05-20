@@ -49,27 +49,21 @@ def pdf_to_text(pdf_path: str) -> str:
     doc.close()
     return "\n".join(all_text)
 
-# ====================== 2. 文本切分（替换为第二个脚本的 RecursiveCharacterTextSplitter） ======================
-def clean_and_split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[Document]:
+# ====================== 2. 文本切分（优化：支持多Document切分） ======================
+def clean_and_split_text(documents: List[Document], chunk_size: int = 500, chunk_overlap: int = 50) -> List[Document]:
     """
-    对齐第二个脚本的文本切分逻辑，返回 Document 列表
+    优化：接收多Document列表，切分后保留每个Document的元数据
     """
-    # 构建 Document 对象（对齐第二个脚本的元数据格式）
-    doc = Document(
-        page_content=text,
-        metadata={"source": "ocr_text", "file_name": "ocr_combined.txt"}
-    )
-    
-    # 使用第二个脚本的 RecursiveCharacterTextSplitter 切分
+    # 使用 RecursiveCharacterTextSplitter 切分多Document
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", "。", "；", "，", " ", ""]
     )
-    chunks = text_splitter.split_documents([doc])
+    chunks = text_splitter.split_documents(documents)
     return chunks
 
-# ====================== 3. 向量库存储（替换为第二个脚本的 DashScope + Milvus 逻辑） ======================
+# ====================== 3. 向量库存储（逻辑不变） ======================
 # Milvus 连接参数（完全对齐第二个脚本）
 MILVUS_HOST = "localhost"
 MILVUS_PORT = "19530"
@@ -97,22 +91,22 @@ def save_to_milvus(documents: List[Document]):
     )
     print("✅ 成功！文本块已存入 Milvus 向量库（通义千问 Embedding）！")
 
-# ====================== 4. 批量处理入口（整合 OCR + 新切分 + 新存储） ======================
+# ====================== 4. 批量处理入口（核心优化：按文件生成Document） ======================
 def process_folder(folder_path: str):
-    """处理整个文件夹的图片和 PDF，使用第二个脚本的切分/Embedding/存储逻辑"""
+    """处理整个文件夹的图片和 PDF，每个文件生成独立Document（带自身元数据）"""
     if not os.path.isdir(folder_path):
         print(f"❌ 目录不存在: {folder_path}")
         return
     
     supported_ext = ('.png', '.jpg', '.jpeg', '.bmp', '.pdf')
-    all_text = ""
+    all_documents = []  # 改为存储每个文件的Document对象
     processed_files = 0
     
     print("=" * 50)
     print("开始处理 OCR 文档并使用通义千问 Embedding 构建向量库")
     print("=" * 50)
 
-    # 1. 批量 OCR 提取文本
+    # 1. 批量 OCR 提取文本（每个文件生成独立Document）
     print("\n[1/3] 提取图片/PDF 文字...")
     for filename in os.listdir(folder_path):
         if not filename.lower().endswith(supported_ext):
@@ -128,7 +122,16 @@ def process_folder(folder_path: str):
                 text = ocr_image_to_text(file_path)
             
             if text:
-                all_text += text + "\n\n"
+                # 关键改动1：每个文件生成独立Document，元数据携带真实文件名/路径
+                doc = Document(
+                    page_content=text,
+                    metadata={
+                        "source": file_path,  # 完整文件路径（可追溯）
+                        "file_name": filename,  # 仅文件名（便于展示）
+                        "file_type": filename.split('.')[-1].lower()  # 新增：文件类型（pdf/png等）
+                    }
+                )
+                all_documents.append(doc)  # 加入Document列表
                 processed_files += 1
                 print(f"   -> 提取 {len(text)} 字符")
             else:
@@ -139,19 +142,26 @@ def process_folder(folder_path: str):
     if processed_files == 0:
         print("❌ 文件夹内没有可提取的文字，退出。")
         return
-    print(f"\n📊 合并文本总长度: {len(all_text)} 字符")
+    # 计算总字符数（遍历所有Document的content）
+    total_chars = sum(len(doc.page_content) for doc in all_documents)
+    print(f"\n📊 合并文本总长度: {total_chars} 字符（共{processed_files}个文件）")
 
-    # 2. 文本分块（使用第二个脚本的切分逻辑）
+    # 2. 文本分块（关键改动2：传入多Document列表，切分后保留元数据）
     print("\n[2/3] 文本分块...")
-    chunks = clean_and_split_text(all_text, chunk_size=500, chunk_overlap=50)
+    chunks = clean_and_split_text(all_documents, chunk_size=500, chunk_overlap=50)
     print(f"共生成 {len(chunks)} 个文本块")
 
-    # 3. 存入 Milvus（使用第二个脚本的 Embedding 和存储逻辑）
+    # 3. 存入 Milvus
     print("\n[3/3] 向量化并存入 Milvus...")
     save_to_milvus(chunks)
     
     print("\n🎉 全部文件处理完成！")
     print(f"Collection 名称：{COLLECTION_NAME}")
+    # 验证：打印前2个文本块的元数据（可选）
+    if chunks:
+        print("\n📌 示例文本块元数据：")
+        for i in range(min(2, len(chunks))):
+            print(f"   文本块{i+1} -> 来源文件: {chunks[i].metadata['file_name']} | 完整路径: {chunks[i].metadata['source']}")
 
 if __name__ == "__main__":
     # 用法：将 ImgorPDF 替换为你的图片/PDF 文件夹路径
