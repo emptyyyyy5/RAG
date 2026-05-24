@@ -4,8 +4,8 @@ import win32com.client
 import pythoncom
 from docx import Document as DocxDocument
 from typing import List
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_community.vectorstores import Milvus
 
@@ -13,7 +13,7 @@ from langchain_community.vectorstores import Milvus
 # 请替换为你的通义千问 API Key
 DASHSCOPE_API_KEY = "sk-2ac2f01cce4947f88f7ad0184b822964"
 # 文档存放的文件夹路径
-DOCS_FOLDER = r"D:\desktop\金融监督管理局\test"
+DOCS_FOLDER = r"C:\Users\q1948\Desktop\project\rag\RAG"
 # Milvus 连接参数
 MILVUS_HOST = "localhost"
 MILVUS_PORT = "19530"
@@ -51,9 +51,10 @@ def parse_word_with_win32(file_path: str) -> str:
 
 def parse_file(file_path: str) -> Document:
     ext = os.path.splitext(file_path)[-1].lower()
+    
     if ext == '.docx':
         doc = DocxDocument(file_path)
-        text = '\n'.join([p.text for p in doc.paragraphs])
+        text = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
     elif ext == '.doc':
         text = parse_word_with_win32(file_path)
     elif ext == '.txt':
@@ -69,9 +70,20 @@ def parse_file(file_path: str) -> Document:
     else:
         raise ValueError(f"不支持的文件类型：{ext}")
 
+    # 新增：空内容检查
+    if not text.strip():
+        raise ValueError(f"文件内容为空（可能是扫描件或乱码）：{file_path}")
+    
+    # 新增：打印内容长度，方便排查
+    print(f"   内容长度：{len(text)} 字符")
+    
     return Document(
         page_content=text,
-        metadata={"source": file_path, "file_name": os.path.basename(file_path)}
+        metadata={
+            "source": file_path,
+            "file_name": os.path.basename(file_path),
+            "char_count": len(text)   # 存入元数据便于后续过滤
+        }
     )
 
 def load_documents_from_folder(folder_path: str) -> List[Document]:
@@ -105,9 +117,13 @@ if __name__ == "__main__":
     # 2. 文本分块
     print("\n[2/4] 文本分块...")
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", "。", "；", "，", " ", ""]
+        chunk_size=800,       # 加大，减少条文被截断
+        chunk_overlap=150,    # 加大重叠，避免跨块信息丢失
+        separators=[
+            "\n第", "\n一、", "\n二、", "\n三、",   # 章节边界
+            "\n（一）", "\n（二）",                  # 条款边界  
+            "\n\n", "\n", "。", "；", " ", ""
+        ]
     )
     chunks = text_splitter.split_documents(docs)
     print(f"共生成 {len(chunks)} 个文本块")
