@@ -1,3 +1,4 @@
+version: '3.5'
 
 services:
   etcd:
@@ -23,11 +24,9 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
-    command: minio server /minio_data
+    command: minio server /minio_data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -38,8 +37,6 @@ services:
     container_name: milvus-standalone
     image: milvusdb/milvus:v2.4.0
     command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -48,16 +45,6 @@ services:
     ports:
       - "19530:19530"
       - "9091:9091"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
-      retries: 3
     depends_on:
       - etcd
       - minio
-
-networks:
-  default:
-    name: milvus

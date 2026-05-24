@@ -3,9 +3,9 @@ import os
 from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_community.vectorstores import Milvus
 from langchain_community.chat_models import ChatTongyi
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import StrOutputParser
-from langchain.schema.runnable import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 # ==================== 配置区 ====================
 # 请替换为你的通义千问 API Key
@@ -62,7 +62,7 @@ def main():
 【回答】"""
 
     prompt = ChatPromptTemplate.from_template(template)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
     def format_docs(docs):
         formatted = []
